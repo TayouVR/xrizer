@@ -16,7 +16,7 @@ use crate::{
 };
 use log::trace;
 
-use super::{profiles::MainAxisType, Input, InteractionProfile};
+use super::{Input, InteractionProfile};
 
 #[derive(Debug, Copy, Clone, PartialEq, Default)]
 pub enum TrackedDeviceType {
@@ -119,7 +119,7 @@ impl XrTrackedDevice {
                     }
                     // I Expect You To Die 3 identifies controllers with this property -
                     // why it couldn't just use ControllerType instead is beyond me...
-                    vr::ETrackedDeviceProperty::ModelNumber_String => Some(data.model),
+                    vr::ETrackedDeviceProperty::ModelNumber_String => Some(*data.model.get(hand)),
                     // Resonite won't recognize controllers without this
                     vr::ETrackedDeviceProperty::RenderModelName_String => {
                         Some(*data.render_model_name.get(hand))
@@ -141,7 +141,7 @@ impl XrTrackedDevice {
                     }
                     // I Expect You To Die 3 identifies controllers with this property -
                     // why it couldn't just use ControllerType instead is beyond me...
-                    vr::ETrackedDeviceProperty::ModelNumber_String => Some(data.model),
+                    vr::ETrackedDeviceProperty::ModelNumber_String => Some(*data.model.get(Hand::Left)),
                     // Resonite won't recognize controllers without this
                     vr::ETrackedDeviceProperty::RenderModelName_String => {
                         Some(*data.render_model_name.get(Hand::Left))
@@ -282,7 +282,7 @@ impl XrTrackedDevice {
             )
             .ok()?;
         let mut pose = vr::space_relation_to_openvr_pose(location, velocity);
-        
+
         //HACK: Trackers will freeze in VRChat like this, which is more desirable when the pose is invalid.
         pose.bDeviceIsConnected = true;
         pose.bPoseIsValid = location.location_flags.contains(xr::SpaceLocationFlags::POSITION_VALID);
@@ -535,65 +535,6 @@ impl<C: openxr_data::Compositor> Input<C> {
         Some(controller_index)
     }
 
-    fn get_profile_data(&self, hand: Hand) -> Option<&super::profiles::ProfileProperties> {
-        let session = self.openxr.session_data.get();
-        let devices = session.input_data.devices.read().ok()?;
-        let controller = devices.get_controller(hand)?;
-
-        self.profile_map
-            .get(&controller.get_profile_path())
-            .map(|v| &**v)
-    }
-
-    pub fn get_controller_string_tracked_property(
-        &self,
-        hand: Hand,
-        property: vr::ETrackedDeviceProperty,
-    ) -> Option<&'static CStr> {
-        self.get_profile_data(hand).and_then(|data| {
-            match property {
-                // Audica likes to apply controller specific tweaks via this property
-                vr::ETrackedDeviceProperty::ControllerType_String => {
-                    Some(data.openvr_controller_type)
-                }
-                // I Expect You To Die 3 identifies controllers with this property -
-                // why it couldn't just use ControllerType instead is beyond me...
-                vr::ETrackedDeviceProperty::ModelNumber_String => Some(data.model),
-                // Resonite won't recognize controllers without this
-                vr::ETrackedDeviceProperty::RenderModelName_String => {
-                    Some(*data.render_model_name.get(hand))
-                }
-                // Required for controllers to be acknowledged in I Expect You To Die 3
-                vr::ETrackedDeviceProperty::SerialNumber_String
-                | vr::ETrackedDeviceProperty::ManufacturerName_String => Some(c"<unknown>"),
-                _ => None,
-            }
-        })
-    }
-
-    pub fn get_controller_int_tracked_property(
-        &self,
-        hand: Hand,
-        property: vr::ETrackedDeviceProperty,
-    ) -> Option<i32> {
-        self.get_profile_data(hand).and_then(|data| match property {
-            vr::ETrackedDeviceProperty::Axis0Type_Int32 => match data.main_axis {
-                MainAxisType::Thumbstick => Some(vr::EVRControllerAxisType::Joystick as _),
-                MainAxisType::Trackpad => Some(vr::EVRControllerAxisType::TrackPad as _),
-            },
-            vr::ETrackedDeviceProperty::Axis1Type_Int32 => {
-                Some(vr::EVRControllerAxisType::Trigger as _)
-            }
-            vr::ETrackedDeviceProperty::Axis2Type_Int32 => {
-                // This is actually the grip, and gets recognized as such
-                Some(vr::EVRControllerAxisType::Trigger as _)
-            }
-            // TODO: report knuckles trackpad?
-            vr::ETrackedDeviceProperty::Axis3Type_Int32
-            | vr::ETrackedDeviceProperty::Axis4Type_Int32 => {
-                Some(vr::EVRControllerAxisType::None as _)
-            }
-            _ => None,
-        })
-    }
+    // These functions have been moved to src/input.rs to avoid duplication
+    // and to support non-controller devices correctly.
 }
