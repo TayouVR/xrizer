@@ -14,7 +14,7 @@ use devices::TrackedDeviceCreateInfo;
 use devices::TrackedDeviceList;
 use devices::TrackedDeviceType;
 use devices::XrTrackedDevice;
-pub use profiles::{InteractionProfile, Profiles};
+pub use profiles::{InteractionProfile, MainAxisType, Profiles};
 use skeletal::FingerState;
 use skeletal::SkeletalInputActionData;
 
@@ -1356,23 +1356,35 @@ impl<C: openxr_data::Compositor> Input<C> {
         }
     }
 
-    fn get_profile_data(&self, hand: Hand) -> Option<&profiles::ProfileProperties> {
-        let path = self
-            .devices
-            .read()
-            .ok()?
-            .get_device(hand.into())?
-            .get_profile_path();
+    fn get_profile_data_by_index(&self, index: vr::TrackedDeviceIndex_t) -> Option<&profiles::ProfileProperties> {
+        let session = self.openxr.session_data.get();
+        let devices = session.input_data.devices.read().ok()?;
+        let device = devices.get_device(index)?;
 
-        self.profile_map.get(&path).map(|v| &**v)
+        self.profile_map
+            .get(&device.get_profile_path())
+            .map(|v| &**v)
     }
 
-    pub fn get_controller_string_tracked_property(
+    #[allow(dead_code)]
+    fn get_profile_data(&self, hand: Hand) -> Option<&profiles::ProfileProperties> {
+        let index = self.get_controller_device_index(hand)?;
+        self.get_profile_data_by_index(index)
+    }
+
+    pub fn get_device_string_tracked_property(
         &self,
-        hand: Hand,
+        index: vr::TrackedDeviceIndex_t,
         property: vr::ETrackedDeviceProperty,
     ) -> Option<&'static CStr> {
-        self.get_profile_data(hand).and_then(|data| {
+        let device_type = self.device_index_to_device_type(index)?;
+        let hand = match device_type {
+            devices::TrackedDeviceType::Controller { hand } => hand,
+            // For non-controller devices, use Left hand as default for properties that require a hand
+            _ => Hand::Left,
+        };
+
+        self.get_profile_data_by_index(index).and_then(|data| {
             match property {
                 // Audica likes to apply controller specific tweaks via this property
                 vr::ETrackedDeviceProperty::ControllerType_String => {
@@ -1394,6 +1406,7 @@ impl<C: openxr_data::Compositor> Input<C> {
                 }
                 // Required for controllers to be acknowledged in I Expect You To Die 3
                 vr::ETrackedDeviceProperty::SerialNumber_String => {
+                    // For all devices, use the serial number from the profile data
                     Some(*data.serial_number.get(hand))
                 }
                 vr::ETrackedDeviceProperty::ManufacturerName_String => Some(data.manufacturer_name),
@@ -1402,12 +1415,12 @@ impl<C: openxr_data::Compositor> Input<C> {
         })
     }
 
-    pub fn get_controller_int_tracked_property(
+    pub fn get_device_int_tracked_property(
         &self,
-        hand: Hand,
+        index: vr::TrackedDeviceIndex_t,
         property: vr::ETrackedDeviceProperty,
     ) -> Option<i32> {
-        self.get_profile_data(hand).and_then(|data| match property {
+        self.get_profile_data_by_index(index).and_then(|data| match property {
             vr::ETrackedDeviceProperty::Axis0Type_Int32 => match data.main_axis {
                 MainAxisType::Thumbstick => Some(vr::EVRControllerAxisType::Joystick as _),
                 MainAxisType::Trackpad => Some(vr::EVRControllerAxisType::TrackPad as _),
@@ -1428,15 +1441,42 @@ impl<C: openxr_data::Compositor> Input<C> {
         })
     }
 
+    pub fn get_device_uint_tracked_property(
+        &self,
+        index: vr::TrackedDeviceIndex_t,
+        property: vr::ETrackedDeviceProperty,
+    ) -> Option<u64> {
+        self.get_profile_data_by_index(index).and_then(|data| match property {
+            vr::ETrackedDeviceProperty::SupportedButtons_Uint64 => Some(data.legacy_buttons_mask),
+            _ => None,
+        })
+    }
+
+    pub fn get_controller_string_tracked_property(
+        &self,
+        hand: Hand,
+        property: vr::ETrackedDeviceProperty,
+    ) -> Option<&'static CStr> {
+        let index = self.get_controller_device_index(hand)?;
+        self.get_device_string_tracked_property(index, property)
+    }
+
+    pub fn get_controller_int_tracked_property(
+        &self,
+        hand: Hand,
+        property: vr::ETrackedDeviceProperty,
+    ) -> Option<i32> {
+        let index = self.get_controller_device_index(hand)?;
+        self.get_device_int_tracked_property(index, property)
+    }
+
     pub fn get_controller_uint_tracked_property(
         &self,
         hand: Hand,
         property: vr::ETrackedDeviceProperty,
     ) -> Option<u64> {
-        self.get_profile_data(hand).and_then(|data| match property {
-            vr::ETrackedDeviceProperty::SupportedButtons_Uint64 => Some(data.legacy_buttons_mask),
-            _ => None,
-        })
+        let index = self.get_controller_device_index(hand)?;
+        self.get_device_uint_tracked_property(index, property)
     }
 
     pub fn post_session_restart(&self, data: &SessionData) {

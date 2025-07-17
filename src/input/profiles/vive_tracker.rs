@@ -1,5 +1,7 @@
+use crate::input::legacy::button_mask_from_id;
 use glam::Mat4;
-
+use openvr::EVRButtonId;
+use crate::button_mask_from_ids;
 use super::{
     InteractionProfile, MainAxisType, PathTranslation, ProfileProperties, Property,
     SkeletalInputBindings, StringToPath,
@@ -11,12 +13,20 @@ pub struct ViveTracker;
 
 impl InteractionProfile for ViveTracker {
     fn properties(&self) -> &'static ProfileProperties {
-        &ProfileProperties {
-            model: c"Vive Tracker Handheld Object",
+        static DEVICE_PROPERTIES: ProfileProperties = ProfileProperties {
+            model: Property::BothHands(c"Vive Tracker Handheld Object"),
             openvr_controller_type: c"vive_tracker_handheld_object",
             render_model_name: Property::BothHands(c"vive_tracker"),
             main_axis: MainAxisType::Thumbstick,
-        }
+            registered_device_type: Property::BothHands(c"vive_tracker"),
+            serial_number: Property::BothHands(c"LHR-FFFFFFF1"),
+            tracking_system_name: c"lighthouse",
+            manufacturer_name: c"HTC",
+            legacy_buttons_mask: button_mask_from_ids!(
+                EVRButtonId::System,
+            ),
+        };
+        &DEVICE_PROPERTIES
     }
     fn profile_path(&self) -> &'static str {
         "/interaction_profiles/htc/vive_tracker_htcx"
