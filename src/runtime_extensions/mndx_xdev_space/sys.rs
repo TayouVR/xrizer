@@ -16,9 +16,9 @@ impl CustomStructureType {
     pub const XR_TYPE_CREATE_XDEV_SPACE_INFO_MNDX: CustomStructureType = Self(1000444005);
 }
 
-impl Into<xr::sys::StructureType> for CustomStructureType {
-    fn into(self) -> xr::sys::StructureType {
-        unsafe { std::mem::transmute(self) }
+impl From<CustomStructureType> for xr::sys::StructureType {
+    fn from(val: CustomStructureType) -> Self {
+        unsafe { std::mem::transmute(val) }
     }
 }
 
@@ -178,26 +178,12 @@ pub type XrCreateXdevSpaceMndx = unsafe extern "system" fn(
 #[derive(Debug, Copy, Clone)]
 pub(super) struct XdevSpaceExtension {
     create_xdev_list_fn: Option<XrCreateXdevListMndx>,
+    #[allow(dead_code)]
     get_xdev_list_generation_number_fn: Option<XrGetXdevListGenerationNumberMndx>,
     enumerate_xdevs_fn: Option<XrEnumerateXdevsMndx>,
     get_xdev_properties_fn: Option<XrGetXdevPropertiesMndx>,
     destroy_xdev_list_fn: Option<XrDestroyXdevListMndx>,
     create_xdev_space_fn: Option<XrCreateXdevSpaceMndx>,
-}
-
-macro_rules! xr_bind {
-    ($instance:expr, $name:expr, $function:expr) => {
-        let res = xr::sys::get_instance_proc_addr(
-            $instance,
-            std::ffi::CStr::from_bytes_until_nul($name)
-                .unwrap()
-                .as_ptr(),
-            std::mem::transmute(std::ptr::addr_of_mut!($function)),
-        );
-        if res != xr::sys::Result::SUCCESS {
-            return Err(res);
-        }
-    };
 }
 
 macro_rules! xr_call {
@@ -216,40 +202,59 @@ macro_rules! xr_call {
     };
 }
 
+// Define a type-safe function pointer getter
+fn get_instance_proc<T>(
+    instance: xr::sys::Instance,
+    name: &[u8],
+) -> xr::Result<Option<T>> {
+    let mut f: Option<T> = None;
+    let res = unsafe {
+        xr::sys::get_instance_proc_addr(
+            instance,
+            std::ffi::CStr::from_bytes_until_nul(name)
+                .unwrap()
+                .as_ptr(),
+            &mut f as *mut _ as *mut _,
+        )
+    };
+
+    match res {
+        xr::sys::Result::SUCCESS => Ok(f),
+        _ => Err(res)
+    }
+}
+
+
 impl XdevSpaceExtension {
     pub fn new(instance: xr::sys::Instance) -> xr::Result<Self> {
-        unsafe {
-            let mut s = Self {
-                create_xdev_list_fn: None,
-                get_xdev_list_generation_number_fn: None,
-                enumerate_xdevs_fn: None,
-                get_xdev_properties_fn: None,
-                destroy_xdev_list_fn: None,
-                create_xdev_space_fn: None,
-            };
-
-            xr_bind!(instance, b"xrCreateXDevListMNDX\0", s.create_xdev_list_fn);
-
-            xr_bind!(
+        let s = Self {
+            create_xdev_list_fn: get_instance_proc(
+                instance, 
+                b"xrCreateXDevListMNDX\0"
+            )?,
+            get_xdev_list_generation_number_fn: get_instance_proc(
                 instance,
                 b"xrGetXDevListGenerationNumberMNDX\0",
-                s.get_xdev_list_generation_number_fn
-            );
-
-            xr_bind!(instance, b"xrEnumerateXDevsMNDX\0", s.enumerate_xdevs_fn);
-
-            xr_bind!(
+            )?,
+            enumerate_xdevs_fn: get_instance_proc(
+                instance, 
+                b"xrEnumerateXDevsMNDX\0"
+            )?,
+            get_xdev_properties_fn: get_instance_proc(
                 instance,
                 b"xrGetXDevPropertiesMNDX\0",
-                s.get_xdev_properties_fn
-            );
+            )?,
+            destroy_xdev_list_fn: get_instance_proc(
+                instance, 
+                b"xrDestroyXDevListMNDX\0"
+            )?,
+            create_xdev_space_fn: get_instance_proc(
+                instance, 
+                b"xrCreateXDevSpaceMNDX\0"
+            )?
+        };
 
-            xr_bind!(instance, b"xrDestroyXDevListMNDX\0", s.destroy_xdev_list_fn);
-
-            xr_bind!(instance, b"xrCreateXDevSpaceMNDX\0", s.create_xdev_space_fn);
-
-            Ok(s)
-        }
+        Ok(s)
     }
 
     pub fn create_xdev_list(

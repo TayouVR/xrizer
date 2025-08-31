@@ -410,6 +410,7 @@ impl TrackedDeviceList {
 
             if res.is_err() {
                 log::error!("Failed to add generic tracker: {:?}", res.unwrap_err());
+                #[allow(clippy::needless_return)]
                 return;
             }
         });
